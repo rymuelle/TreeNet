@@ -92,5 +92,7 @@ def visualize_one_batch(model, loader, device, fold, max_images=8, supress_tqdm=
             
             n_images+=1
             plt.savefig(f'/kaggle/working/{fold}_{batch_idx}_{idx}.jpg')
+            plt.close()
+
         if n_images >= max_images:
             return True
