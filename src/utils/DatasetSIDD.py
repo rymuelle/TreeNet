@@ -46,11 +46,11 @@ class DatasetSIDD(Dataset):
             bottom = (height + crop_size)/2
 
             noisy = noisy.crop((left, top, right, bottom))
-            noisy = np.asarray(noisy)
+            noisy = np.asarray(noisy).copy()
 
             clean = Image.open(gt_path).convert("RGB")
             clean = clean.crop((left, top, right, bottom))
-            clean = np.asarray(clean)
+            clean = np.asarray(clean).copy()
             self.noisy_img.append(noisy)
             self.gt_img.append(clean)
 
