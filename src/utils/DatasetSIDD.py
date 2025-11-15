@@ -106,16 +106,6 @@ class DatasetSIDD(Dataset):
         noisy = transforms.ToTensor()(noisy_arr)
         clean = transforms.ToTensor()(gt_array)
 
-        # Choose crop location
-        if self.validation:
-            top = (H - ps) // 2
-            left = (W - ps) // 2
-        else:
-            top = random.randint(0, H - ps)
-            left = random.randint(0, W - ps)
-
-        noisy = noisy[:, top:top+ps, left:left+ps]
-        clean = clean[:, top:top+ps, left:left+ps]
 
         # Augmentations
         if not self.validation:
