@@ -14,7 +14,7 @@ import pandas as pd
 
 class DatasetSIDD(Dataset):
     def __init__(self, scene_folders, patch_size=256, crop_size=2560,
-                validation=False, transform=None):
+                validation=False, transform=None, max_images=0):
         """
         scene_folders: list of scene directories
         """
@@ -55,7 +55,9 @@ class DatasetSIDD(Dataset):
             self.gt_img.append(clean)
 
             self.image_name.append((noisy_path, gt_path))
-            break
+            if max_images and len(self.noisy_img) >= max_images:
+                break
+
 
 
     def __len__(self):
