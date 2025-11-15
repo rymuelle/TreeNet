@@ -33,9 +33,10 @@ def load_and_crop_once(path, crop_size):
 
     # Load original (uncropped) only once
     if path not in _IMAGE_CACHE:
-        img = Image.open(path).convert("RGB")
-        _IMAGE_CACHE[path] = img.copy()
-        img.close()
+        img = Image.open(path)
+        img.load()                     
+        img = img.convert("RGB")    
+        _IMAGE_CACHE[path] = img
     else:
         img = _IMAGE_CACHE[path]
 
