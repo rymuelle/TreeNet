@@ -6,15 +6,15 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
-import torchvision.transforms.functional as F  # <-- Added this import
+import torchvision.transforms.functional as F 
 import numpy as np
-from tqdm import tqdm  # <-- Added this import
+from tqdm import tqdm 
 from sklearn.model_selection import KFold
 import pandas as pd
 
 class DatasetSIDD(Dataset):
     def __init__(self, scene_folders, patch_size=256, crop_size=2560,
-                validation=False, transform=None, max_images=0):
+                validation=False, transform=None, max_images=0, supress_tqdm=True):
         """
         scene_folders: list of scene directories
         """
@@ -34,9 +34,9 @@ class DatasetSIDD(Dataset):
         self.noisy_img = []
         self.gt_img = []
         self.image_name = [] 
-        
+        self.supress_tqdm = supress_tqdm
         print(f"Loading {'validation' if validation else 'training'} data...")
-        for noisy_path, gt_path in tqdm(self.samples):
+        for noisy_path, gt_path in tqdm(self.samples, dissable=supress_tqdm):
             noisy = Image.open(noisy_path).convert("RGB")
             
             width, height = noisy.size  
@@ -116,7 +116,7 @@ class DatasetSIDD(Dataset):
         return noisy, clean
     
 
-def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42,  max_images=0):
+def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42,  max_images=0, supress_tqdm=True):
     """
     A generator that yields train and validation datasets for each k-fold split.
     Splits are made at the SCENE level.
@@ -148,12 +148,14 @@ def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42,  max_image
         train_dataset = DatasetSIDD(train_scenes, 
                                      patch_size=patch_size, 
                                      validation=False,
-                                     max_images=max_images)
+                                     max_images=max_images,
+                                     supress_tqdm=supress_tqdm)
                                      
         val_dataset = DatasetSIDD(val_scenes, 
                                    patch_size=patch_size, 
                                    validation=True,
-                                   max_images=max_images)
+                                   max_images=max_images,
+                                     supress_tqdm=supress_tqdm)
         
         print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
         
