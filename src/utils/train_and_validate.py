@@ -64,7 +64,7 @@ def validate_one_epoch(model, loader, criterion, device, epoch=0, supress_tqdm=T
 
 
 @torch.no_grad()
-def visualize_one_batch(model, loader, device, max_images=8, supress_tqdm=True):
+def visualize_one_batch(model, loader, device, fold, max_images=8, supress_tqdm=True):
     model.eval()
     running_loss = 0.0
     running_psnr = 0.0
@@ -89,6 +89,6 @@ def visualize_one_batch(model, loader, device, max_images=8, supress_tqdm=True):
             plt.subplot(1, 3, 3)
             plt.imshow(noisy[idx].permute(1, 2, 0))
             n_images+=1
-            # plt.savefig(f'/kaggle/working/{batch_idx}_{idx}.jpg')
+            plt.savefig(f'/kaggle/working/{fold}_{batch_idx}_{idx}.jpg')
         if n_images >= max_images:
             return True
