@@ -65,7 +65,6 @@ class DatasetSIDD(Dataset):
                 self.samples.append((n, g))
 
         # Preload & crop all images once (cached globally!)
-        print(f"Preparing {'validation' if validation else 'training'} data...")
         self.noisy_img = []
         self.gt_img = []
         self.image_name = []
@@ -91,8 +90,8 @@ class DatasetSIDD(Dataset):
         noisy_arr = self.noisy_img[idx]
         gt_array = self.gt_img[idx]
         ps = self.patch_size
-        _, H, W = noisy_arr.shape
-
+        H, W, _ = noisy_arr.shape
+        
         # Choose crop location
         if self.validation:
             top = (H - ps) // 2
@@ -101,8 +100,8 @@ class DatasetSIDD(Dataset):
             top = random.randint(0, H - ps)
             left = random.randint(0, W - ps)
 
-        noisy_arr = noisy_arr[:, top:top+ps, left:left+ps]
-        gt_array = gt_array[:, top:top+ps, left:left+ps]
+        noisy_arr = noisy_arr[top:top+ps, left:left+ps, :]
+        gt_array = gt_array[top:top+ps, left:left+ps, :]
 
         noisy = transforms.ToTensor()(noisy_arr)
         clean = transforms.ToTensor()(gt_array)
