@@ -47,7 +47,7 @@ def load_and_crop_once(path, crop_size):
     right  = left + crop_size
     bottom = top + crop_size
 
-    cropped = np.asarray(img.crop((left, top, right, bottom))).copy()
+    cropped = np.asarray(img.crop((left, top, right, bottom)))
 
     _CROP_SIZE_CACHE[key] = cropped
     return cropped
