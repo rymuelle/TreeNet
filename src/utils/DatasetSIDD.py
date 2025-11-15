@@ -1,120 +1,134 @@
-
 import os
 import glob
 import random
 from PIL import Image
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 from torchvision import transforms
-import torchvision.transforms.functional as F 
+import torchvision.transforms.functional as F
 import numpy as np
-from tqdm import tqdm 
+from tqdm import tqdm
 from sklearn.model_selection import KFold
 import pandas as pd
 
+# ------------------------------------------------------------------
+# GLOBAL IMAGE CACHE
+# maps: noisy_path → numpy array, gt_path → numpy array
+# ------------------------------------------------------------------
+_IMAGE_CACHE = {}
+_CROP_SIZE_CACHE = {}   # store cropped versions keyed by (path, crop_size)
+
+
+def load_and_crop_once(path, crop_size):
+    """
+    Loads an image from disk once, applies a center crop once,
+    and returns a numpy array.
+    """
+
+    key = (path, crop_size)
+
+    # Return cached version
+    if key in _CROP_SIZE_CACHE:
+        return _CROP_SIZE_CACHE[key]
+
+    # Load original (uncropped) only once
+    if path not in _IMAGE_CACHE:
+        img = Image.open(path).convert("RGB")
+        _IMAGE_CACHE[path] = img.copy()
+        img.close()
+    else:
+        img = _IMAGE_CACHE[path]
+
+    # Compute crop
+    w, h = img.size
+    left   = (w - crop_size) // 2
+    top    = (h - crop_size) // 2
+    right  = left + crop_size
+    bottom = top + crop_size
+
+    cropped = np.asarray(img.crop((left, top, right, bottom))).copy()
+
+    _CROP_SIZE_CACHE[key] = cropped
+    return cropped
+
+
+# ------------------------------------------------------------------
+# DATASET
+# ------------------------------------------------------------------
 class DatasetSIDD(Dataset):
     def __init__(self, scene_folders, patch_size=256, crop_size=2560,
-                validation=False, transform=None, max_images=0, supress_tqdm=True):
-        """
-        scene_folders: list of scene directories
-        """
-        self.samples = []
+                 validation=False, transform=None, max_images=0,
+                 supress_tqdm=True):
+
         self.patch_size = patch_size
         self.validation = validation
         self.transform = transform
+        self.supress_tqdm = supress_tqdm
 
+        # list of (noisy_path, gt_path)
+        self.samples = []
         for scene in scene_folders:
             noisy_imgs = sorted(glob.glob(os.path.join(scene, "*NOISY_SRGB_*.PNG")))
             gt_imgs    = sorted(glob.glob(os.path.join(scene, "*GT_SRGB_*.PNG")))
+            for n, g in zip(noisy_imgs, gt_imgs):
+                self.samples.append((n, g))
 
-            for noisy_path, gt_path in zip(noisy_imgs, gt_imgs):
-                self.samples.append((noisy_path, gt_path))
-
-        # --- Pre-loading images ---
+        # Preload & crop all images once (cached globally!)
+        print(f"Preparing {'validation' if validation else 'training'} data...")
         self.noisy_img = []
         self.gt_img = []
-        self.image_name = [] 
-        self.supress_tqdm = supress_tqdm
-        print(f"Loading {'validation' if validation else 'training'} data...")
-        for noisy_path, gt_path in tqdm(self.samples, disable=supress_tqdm):
-            noisy = Image.open(noisy_path).convert("RGB")
-            
-            width, height = noisy.size  
-            left = (width - crop_size)/2
-            top = (height - crop_size)/2
-            right = (width + crop_size)/2
-            bottom = (height + crop_size)/2
+        self.image_name = []
 
-            noisy = noisy.crop((left, top, right, bottom))
-            noisy = np.asarray(noisy).copy()
+        for noisy_path, gt_path in tqdm(self.samples, disable=self.supress_tqdm):
+            noisy = load_and_crop_once(noisy_path, crop_size)
+            clean = load_and_crop_once(gt_path, crop_size)
 
-            clean = Image.open(gt_path).convert("RGB")
-            clean = clean.crop((left, top, right, bottom))
-            clean = np.asarray(clean).copy()
             self.noisy_img.append(noisy)
             self.gt_img.append(clean)
-
             self.image_name.append((noisy_path, gt_path))
+
             if max_images and len(self.noisy_img) >= max_images:
                 break
-
-
 
     def __len__(self):
         return len(self.noisy_img)
 
-
     def __getitem__(self, idx):
-        noisy = self.noisy_img[idx]
-        clean = self.gt_img[idx]
-    
-        # Convert to tensor for cropping
-        noisy = transforms.ToTensor()(noisy)
-        clean = transforms.ToTensor()(clean)
-    
-        # --- Random or center crop (aligned) ---
-        _, H, W = noisy.shape
+        noisy = transforms.ToTensor()(self.noisy_img[idx])
+        clean = transforms.ToTensor()(self.gt_img[idx])
+
         ps = self.patch_size
-        
-        # Default to top-left if image is smaller than patch size (shouldn't happen with SIDD)
-        top, left = 0, 0
-        
-        if H >= ps and W >= ps:
-            if self.validation:
-                top = (H - ps) // 2
-                left = (W - ps) // 2
-            else:
-                top = random.randint(0, H - ps)
-                left = random.randint(0, W - ps)
-                
+        _, H, W = noisy.shape
+
+        # Choose crop location
+        if self.validation:
+            top = (H - ps) // 2
+            left = (W - ps) // 2
+        else:
+            top = random.randint(0, H - ps)
+            left = random.randint(0, W - ps)
+
         noisy = noisy[:, top:top+ps, left:left+ps]
         clean = clean[:, top:top+ps, left:left+ps]
-    
-        # --- Random flips and rotations ---
+
+        # Augmentations
         if not self.validation:
-            # Horizontal flip
             if random.random() < 0.5:
-                noisy = F.hflip(noisy)
-                clean = F.hflip(clean)
-    
-            # Vertical flip
+                noisy = F.hflip(noisy); clean = F.hflip(clean)
             if random.random() < 0.5:
-                noisy = F.vflip(noisy)
-                clean = F.vflip(clean)
-    
-            # 0°, 90°, 180°, or 270° rotation
+                noisy = F.vflip(noisy); clean = F.vflip(clean)
             k = random.randint(0, 3)
             if k:
-                noisy = torch.rot90(noisy, k, [1, 2])
-                clean = torch.rot90(clean, k, [1, 2])
-    
-        # --- Optional additional transform ---
+                noisy = torch.rot90(noisy, k, (1,2))
+                clean = torch.rot90(clean, k, (1,2))
+
         if self.transform:
             noisy = self.transform(noisy)
             clean = self.transform(clean)
-    
+
         return noisy, clean
-    
+
+
 
 def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42,  max_images=0, supress_tqdm=True):
     """
