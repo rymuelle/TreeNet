@@ -194,8 +194,8 @@ def validate_model(val_dataset, model, criterion, device):
         noisy_patches = noisy_patches.to(device)
 
         for patch_number, (noisy_patch, gt_patch) in enumerate(zip(noisy_patches, gt_patches)):
-            noisy_patch = noisy_patch.unsqueeze(0)
-            gt_patch = gt_patch.unsqueeze(0)
+            noisy_patch = noisy_patch.unsqueeze(0).to(device)
+            gt_patch = gt_patch.unsqueeze(0).to(device)
             with torch.no_grad():
                 pred = model(noisy_patch)
             loss = criterion(pred, gt_patch).item()
