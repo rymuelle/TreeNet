@@ -1,0 +1,36 @@
+import numpy as np
+import math
+import torch
+
+def psnr(mse_loss):
+    """Convert MSE to PSNR (dB). Assumes input images in [0,1]."""
+    return -10.0 * math.log10(mse_loss) if mse_loss > 0 else 100.0
+
+class PSNRLoss(nn.Module):
+    '''Taken from NAFNet'''
+    def __init__(self, loss_weight=1.0, reduction='mean', toY=False):
+        super(PSNRLoss, self).__init__()
+        assert reduction == 'mean'
+        self.loss_weight = loss_weight
+        self.scale = 10 / np.log(10)
+        self.toY = toY
+        self.coef = torch.tensor([65.481, 128.553, 24.966]).reshape(1, 3, 1, 1)
+        self.first = True
+
+    def forward(self, pred, target):
+        assert len(pred.size()) == 4
+        if self.toY:
+            if self.first:
+                self.coef = self.coef.to(pred.device)
+                self.first = False
+
+            pred = (pred * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.
+            target = (target * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.
+
+            pred, target = pred / 255., target / 255.
+            pass
+        assert len(pred.size()) == 4
+
+        return self.loss_weight * self.scale * torch.log(((pred - target) ** 2).mean(dim=(1, 2, 3)) + 1e-8).mean()
+
+loss_fn = PSNRLoss()
