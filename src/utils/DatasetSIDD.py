@@ -87,11 +87,25 @@ class DatasetSIDD(Dataset):
     def __getitem__(self, idx):
         # noisy_path, gt_path = self.samples[idx]
         # noisy_image = load_cropped_numpy(noisy_path, self.cro)
-        noisy = transforms.ToTensor()(self.noisy_img[idx])
-        clean = transforms.ToTensor()(self.gt_img[idx])
 
+        noisy_arr = self.noisy_img[idx]
+        gt_array = self.gt_img[idx]
         ps = self.patch_size
-        _, H, W = noisy.shape
+        _, H, W = noisy_arr.shape
+
+        # Choose crop location
+        if self.validation:
+            top = (H - ps) // 2
+            left = (W - ps) // 2
+        else:
+            top = random.randint(0, H - ps)
+            left = random.randint(0, W - ps)
+
+        noisy_arr = noisy_arr[:, top:top+ps, left:left+ps]
+        gt_array = gt_array[:, top:top+ps, left:left+ps]
+
+        noisy = transforms.ToTensor()(noisy_arr)
+        clean = transforms.ToTensor()(gt_array)
 
         # Choose crop location
         if self.validation:
