@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import torch
+import torch.nn as nn
 
 def psnr(mse_loss):
     """Convert MSE to PSNR (dB). Assumes input images in [0,1]."""
