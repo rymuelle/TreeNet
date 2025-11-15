@@ -14,14 +14,15 @@ import pandas as pd
 
 class DatasetSIDD(Dataset):
     def __init__(self, scene_folders, patch_size=256, crop_size=2560,
-                validation=False):
+                validation=False, transform=None):
         """
         scene_folders: list of scene directories
         """
         self.samples = []
-        self.transform = transform
         self.patch_size = patch_size
         self.validation = validation
+        self.transform = transform
+
         for scene in scene_folders:
             noisy_imgs = sorted(glob.glob(os.path.join(scene, "*NOISY_SRGB_*.PNG")))
             gt_imgs    = sorted(glob.glob(os.path.join(scene, "*GT_SRGB_*.PNG")))
@@ -142,11 +143,11 @@ def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42):
         print(f"Train scenes: {len(train_scenes)}, Val scenes: {len(val_scenes)}")
 
         # Create the Dataset objects using your class
-        train_dataset = SIDD_Dataset(train_scenes, 
+        train_dataset = DatasetSIDD(train_scenes, 
                                      patch_size=patch_size, 
                                      validation=False)
                                      
-        val_dataset = SIDD_Dataset(val_scenes, 
+        val_dataset = DatasetSIDD(val_scenes, 
                                    patch_size=patch_size, 
                                    validation=True)
         
