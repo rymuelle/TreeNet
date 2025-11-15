@@ -19,38 +19,27 @@ _IMAGE_CACHE = {}
 _CROP_SIZE_CACHE = {}   # store cropped versions keyed by (path, crop_size)
 
 
-def load_and_crop_once(path, crop_size):
-    """
-    Loads an image from disk once, applies a center crop once,
-    and returns a numpy array.
-    """
+# Single global cache
+_IMAGE_CACHE = {}
 
-    key = (path, crop_size)
+def load_cropped_numpy(path, crop_size):
+    if path in _IMAGE_CACHE:
+        return _IMAGE_CACHE[path]
 
-    # Return cached version
-    if key in _CROP_SIZE_CACHE:
-        return _CROP_SIZE_CACHE[key]
+    img = Image.open(path)
+    img.load()
+    img = img.convert("RGB")
 
-    # Load original (uncropped) only once
-    if path not in _IMAGE_CACHE:
-        img = Image.open(path)
-        img.load()                     
-        img = img.convert("RGB")    
-        _IMAGE_CACHE[path] = img
-    else:
-        img = _IMAGE_CACHE[path]
-
-    # Compute crop
     w, h = img.size
-    left   = (w - crop_size) // 2
-    top    = (h - crop_size) // 2
-    right  = left + crop_size
+    left = (w - crop_size) // 2
+    top = (h - crop_size) // 2
+    right = left + crop_size
     bottom = top + crop_size
 
-    cropped = np.asarray(img.crop((left, top, right, bottom)))
+    arr = np.asarray(img.crop((left, top, right, bottom)), dtype=np.uint8).copy()
+    _IMAGE_CACHE[path] = arr
+    return arr
 
-    _CROP_SIZE_CACHE[key] = cropped
-    return cropped
 
 
 # ------------------------------------------------------------------
@@ -81,8 +70,8 @@ class DatasetSIDD(Dataset):
         self.image_name = []
 
         for noisy_path, gt_path in tqdm(self.samples, disable=self.supress_tqdm):
-            noisy = load_and_crop_once(noisy_path, crop_size)
-            clean = load_and_crop_once(gt_path, crop_size)
+            noisy = load_cropped_numpy(noisy_path, crop_size)
+            clean = load_cropped_numpy(gt_path, crop_size)
 
             self.noisy_img.append(noisy)
             self.gt_img.append(clean)
