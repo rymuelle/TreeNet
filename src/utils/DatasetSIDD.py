@@ -36,7 +36,7 @@ class DatasetSIDD(Dataset):
         self.image_name = [] 
         self.supress_tqdm = supress_tqdm
         print(f"Loading {'validation' if validation else 'training'} data...")
-        for noisy_path, gt_path in tqdm(self.samples, dissable=supress_tqdm):
+        for noisy_path, gt_path in tqdm(self.samples, disable=supress_tqdm):
             noisy = Image.open(noisy_path).convert("RGB")
             
             width, height = noisy.size  
