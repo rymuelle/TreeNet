@@ -116,7 +116,7 @@ class DatasetSIDD(Dataset):
         return noisy, clean
     
 
-def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42):
+def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42,  max_images=0):
     """
     A generator that yields train and validation datasets for each k-fold split.
     Splits are made at the SCENE level.
@@ -147,11 +147,13 @@ def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, seed=42):
         # Create the Dataset objects using your class
         train_dataset = DatasetSIDD(train_scenes, 
                                      patch_size=patch_size, 
-                                     validation=False)
+                                     validation=False,
+                                     max_images=max_images)
                                      
         val_dataset = DatasetSIDD(val_scenes, 
                                    patch_size=patch_size, 
-                                   validation=True)
+                                   validation=True,
+                                   max_images=max_images)
         
         print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
         
