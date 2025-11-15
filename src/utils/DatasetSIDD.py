@@ -50,6 +50,7 @@ class DatasetSIDD(Dataset):
                  validation=False, transform=None, max_images=0,
                  supress_tqdm=True):
 
+        self.crop_size = crop_size
         self.patch_size = patch_size
         self.validation = validation
         self.transform = transform
@@ -69,23 +70,26 @@ class DatasetSIDD(Dataset):
         self.gt_img = []
         self.image_name = []
 
-        for noisy_path, gt_path in tqdm(self.samples, disable=self.supress_tqdm):
-            noisy = load_cropped_numpy(noisy_path, crop_size)
-            clean = load_cropped_numpy(gt_path, crop_size)
+        # for noisy_path, gt_path in tqdm(self.samples, disable=self.supress_tqdm):
+        #     noisy = load_cropped_numpy(noisy_path, crop_size)
+        #     clean = load_cropped_numpy(gt_path, crop_size)
 
-            self.noisy_img.append(noisy)
-            self.gt_img.append(clean)
-            self.image_name.append((noisy_path, gt_path))
+        #     self.noisy_img.append(noisy)
+        #     self.gt_img.append(clean)
+        #     self.image_name.append((noisy_path, gt_path))
 
-            if max_images and len(self.noisy_img) >= max_images:
-                break
+        #     if max_images and len(self.noisy_img) >= max_images:
+        #         break
 
     def __len__(self):
         return len(self.noisy_img)
 
     def __getitem__(self, idx):
-        noisy = transforms.ToTensor()(self.noisy_img[idx])
-        clean = transforms.ToTensor()(self.gt_img[idx])
+        noisy_path, gt_path = self.samples[idx]
+        noisy_image = load_cropped_numpy(noisy_path, self.crop_size)
+        gt_image = load_cropped_numpy(gt_path, self.crop_size)
+        noisy = transforms.ToTensor()(noisy_image)
+        clean = transforms.ToTensor()(gt_image)
 
         ps = self.patch_size
         _, H, W = noisy.shape
