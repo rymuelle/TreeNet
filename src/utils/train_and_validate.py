@@ -76,16 +76,20 @@ def visualize_one_batch(model, loader, device, fold, max_images=8, supress_tqdm=
         output = output[:max_images].cpu()
         clean = clean[:max_images].cpu()
         for idx in range(output.shape[0]):
-            plt.subplots(1, 3, figsize=(15, 5))
+            plt.subplots(2, 2, figsize=(10, 10))
 
-            plt.subplot(1, 3, 1)
+            plt.subplot(2, 2, 1)
             plt.imshow(clean[idx].permute(1, 2, 0))
 
-            plt.subplot(1, 3, 2)
+            plt.subplot(2, 2, 2)
             plt.imshow(output[idx].permute(1, 2, 0))
 
-            plt.subplot(1, 3, 3)
+            plt.subplot(2, 2, 3)
             plt.imshow(noisy[idx].permute(1, 2, 0))
+
+            plt.subplot(2, 2, 4)
+            plt.imshow(output[idx].permute(1, 2, 0)-clean[idx].permute(1, 2, 0)+0.5)
+            
             n_images+=1
             plt.savefig(f'/kaggle/working/{fold}_{batch_idx}_{idx}.jpg')
         if n_images >= max_images:
