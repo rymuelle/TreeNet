@@ -3,7 +3,7 @@ import torch.nn as nn
 from tqdm import tqdm
 import math
 import matplotlib.pyplot as plt
-
+from .losses import psnr
 
 
 
@@ -66,8 +66,6 @@ def validate_one_epoch(model, loader, criterion, device, epoch=0, supress_tqdm=T
 @torch.no_grad()
 def visualize_one_batch(model, loader, device, fold, max_images=8, supress_tqdm=True):
     model.eval()
-    running_loss = 0.0
-    running_psnr = 0.0
     n_images = 0
     pbar = tqdm(enumerate(loader), total=len(loader), desc=f"Visualize", disable=supress_tqdm)
     for batch_idx, (noisy, clean) in pbar:
