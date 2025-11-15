@@ -165,12 +165,14 @@ def make_patches(image: torch.tensor, patch_size=256):
 def validate_model(val_dataset, model, criterion, device):
     model = model.eval()
     loss_list = []
-    for images, (noisy, gt) in zip(val_dataset.image_name,val_dataset):
+    for images, (noisy, gt) in zip(val_dataset.image_name, val_dataset):
         noisy_patches = make_patches(noisy)
         gt_patches = make_patches(gt)
         noisy_patches = noisy_patches.to(device)
 
         for patch_number, (noisy_patch, gt_patch) in enumerate(zip(noisy_patches, gt_patches)):
+            noisy_patch = noisy_patch.unsqueeze(0)
+            gt_patch = gt_patch.unsqueeze(0)
             with torch.no_grad():
                 pred = model(noisy_patch)
             loss = criterion(pred, gt_patch).item()
