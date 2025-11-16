@@ -11,6 +11,7 @@ from tqdm import tqdm
 from sklearn.model_selection import KFold
 import pandas as pd
 
+
 # ------------------------------------------------------------------
 # GLOBAL IMAGE CACHE
 # maps: noisy_path → numpy array, gt_path → numpy array
@@ -126,33 +127,53 @@ class DatasetSIDD(Dataset):
 
 
 
-def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, crop_size=2560, seed=42,  max_images=0, supress_tqdm=True):
+def extract_scene_id(dirname):
     """
-    A generator that yields train and validation datasets for each k-fold split.
-    Splits are made at the SCENE level.
+    Extracts the scene ID (the second number between underscores).
+    Example: "0164_007_IP_00400..." → scene_id = 7
     """
-    # Get all scene folders
-    all_scene_folders = sorted(glob.glob(os.path.join(root_dir, "*")))
-    
-    # Use numpy for easier indexing
-    all_scenes_np = np.array(all_scene_folders)
+    base = os.path.basename(dirname)
+    parts = base.split("_")
+    return int(parts[1])   # second field is the scene ID
 
-    # Initialize the K-Fold splitter
-    # shuffle=True ensures a random (but reproducible) split
+
+def get_k_fold_datasets(root_dir, k_folds=5, patch_size=128, crop_size=2560,
+                        seed=42, max_images=0, supress_tqdm=True):
+    """
+    K-fold generator that splits DATA BY SCENE rather than by directory.
+    Scenes are determined by the second number in the directory name.
+    """
+
+    # All directories in the root 
+    all_dirs = sorted(glob.glob(os.path.join(root_dir, "*")))
+
+    # Group directories by scene_id
+    scene_dict = {}
+    for d in all_dirs:
+        scene_id = extract_scene_id(d)
+        scene_dict.setdefault(scene_id, []).append(d)
+
+    # Sorted list of scene IDs
+    all_scene_ids = sorted(scene_dict.keys())
+    all_scene_ids_np = np.array(all_scene_ids)
+
+    print(f"Total scenes: {len(all_scene_ids)}. Using {k_folds}-Fold Cross-Validation.")
+
+    # K-fold split by SCENE IDs
     kf = KFold(n_splits=k_folds, shuffle=True, random_state=seed)
 
-    print(f"Total scenes: {len(all_scenes_np)}. Using {k_folds}-Fold Cross-Validation.")
+    for fold, (train_ids_idx, val_ids_idx) in enumerate(kf.split(all_scene_ids_np)):
 
-    # kf.split() yields indices for train and test (which we use as val)
-    for fold, (train_indices, val_indices) in enumerate(kf.split(all_scenes_np)):
-        
-        print(f"\n--- FOLD {fold + 1}/{k_folds} ---")
-        
-        # Select the scene folders for this fold
-        train_scenes = list(all_scenes_np[train_indices])
-        val_scenes = list(all_scenes_np[val_indices])
+        train_scene_ids = all_scene_ids_np[train_ids_idx]
+        val_scene_ids   = all_scene_ids_np[val_ids_idx]
 
-        print(f"Train scenes: {len(train_scenes)}, Val scenes: {len(val_scenes)}")
+        # Expand scene IDs back into full directory lists
+        train_scenes = [d for sid in train_scene_ids for d in scene_dict[sid]]
+        val_scenes   = [d for sid in val_scene_ids   for d in scene_dict[sid]]
+
+        print(f"\n--- FOLD {fold+1}/{k_folds} ---")
+        print("Train scene IDs:", train_scene_ids)
+        print("Val   scene IDs:", val_scene_ids)
 
         # Create the Dataset objects using your class
         train_dataset = DatasetSIDD(train_scenes, 
