@@ -72,9 +72,9 @@ def visualize_one_batch(model, loader, device, fold, max_images=8, supress_tqdm=
         noisy, clean = noisy.to(device), clean.to(device)
 
         output = model(noisy)
-        noisy = noisy[:max_images].cpu()
-        output = output[:max_images].cpu()
-        clean = clean[:max_images].cpu()
+        noisy = noisy[:max_images].cpu().clamp(0, 1)
+        output = output[:max_images].cpu().clamp(0, 1)
+        clean = clean[:max_images].cpu().clamp(0, 1)
         for idx in range(output.shape[0]):
             plt.subplots(2, 2, figsize=(10, 10))
 
