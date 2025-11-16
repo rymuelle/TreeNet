@@ -1,8 +1,6 @@
-import torch
-import torch.nn as nn
-from src.arch.utils import *
+
 # ------------------------------------------------------------------------
-# Copyright (c) 2022 megvii-model. All Rights Reserved.
+# Modified from NAFNet
 # ------------------------------------------------------------------------
 
 '''
@@ -15,6 +13,12 @@ Simple Baselines for Image Restoration
   year={2022}
 }
 '''
+
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from .utils import *
 
 class SimpleGate(nn.Module):
     def forward(self, x):
