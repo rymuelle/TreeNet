@@ -50,16 +50,16 @@ class DWBlock(nn.Module):
     
 
 class DWBlockV2(nn.Module):
-    def __init__(self, c, DW_Expand=2):
+    def __init__(self, c):
         super().__init__()
-        dw_channel = c * DW_Expand
         self.conv1 = nn.Conv2d(in_channels=c, out_channels=c, kernel_size=1, padding=0, stride=1, groups=1, bias=True)
-        self.conv2 = nn.Conv2d(in_channels=dw_channel, out_channels=dw_channel, kernel_size=3, padding=1, stride=1, groups=dw_channel,
+        self.conv2 = nn.Conv2d(in_channels=c, out_channels=c, kernel_size=3, padding=1, stride=1, groups=c,
                                bias=True)
-
+        self.conv3 = nn.Conv2d(in_channels=c, out_channels=c, kernel_size=3, padding=1, stride=1, groups=c,
+                               bias=True)
         self.sca = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels=dw_channel // 2, out_channels=dw_channel // 2, kernel_size=1, padding=0, stride=1,
+            nn.Conv2d(in_channels=c, out_channels=c, kernel_size=1, padding=0, stride=1,
                       groups=1, bias=True),
         )
 
@@ -71,9 +71,9 @@ class DWBlockV2(nn.Module):
         x = inp
         norm_x = self.norm(x)
         x = self.conv1(norm_x)
-        x = torch.cat([x, norm_x], dim=1)
-        x = self.conv2(x)
-        x = self.sg(x)
+        x1 = self.conv2(x)
+        x2 = self.conv3(norm_x)
+        x = x1 * x2
         x = x * self.sca(x)
         return inp + x * self.beta
 
