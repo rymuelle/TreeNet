@@ -57,11 +57,11 @@ class DWBlockV2(nn.Module):
                                bias=True)
         self.conv3 = nn.Conv2d(in_channels=c, out_channels=c, kernel_size=3, padding=1, stride=1, groups=c,
                                bias=True)
-        self.sca = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_channels=c, out_channels=c, kernel_size=1, padding=0, stride=1,
-                      groups=1, bias=True),
-        )
+        # self.sca = nn.Sequential(
+        #     nn.AdaptiveAvgPool2d(1),
+        #     nn.Conv2d(in_channels=c, out_channels=c, kernel_size=1, padding=0, stride=1,
+        #               groups=1, bias=True),
+        # )
 
         self.sg = SimpleGate()
         self.norm = LayerNorm2d(c)
@@ -74,7 +74,7 @@ class DWBlockV2(nn.Module):
         x1 = self.conv2(x)
         x2 = self.conv3(norm_x)
         x = x1 * x2
-        x = x * self.sca(x)
+        # x = x * self.sca(x)
         return inp + x * self.beta
 
 
@@ -87,10 +87,15 @@ class PWBlock(nn.Module):
         self.sg = SimpleGate()
         self.norm = LayerNorm2d(c)
         self.beta = nn.Parameter(torch.zeros((1, c, 1, 1)), requires_grad=True)
-
+        self.sca = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels=c, out_channels=c, kernel_size=1, padding=0, stride=1,
+                      groups=1, bias=True),
+        )
     def forward(self, inp):
         x = inp
         x = self.norm(x)
+        x = x * self.sca(x)
         x = self.conv1(x)
         x = self.sg(x)
         x = self.conv2(x)
@@ -146,7 +151,6 @@ class DWPW(nn.Module):
                     *[PWBlock(chan) for _ in range(pwnum)]
                 )
             )
-            print(dwnum, pwnum)
 
         self.padder_size = 2 ** len(self.encoders)
 
