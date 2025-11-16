@@ -148,7 +148,7 @@ class AblatedNAF(nn.Module):
 
         self.middle_blks = \
             nn.Sequential(
-                *[NAFBlock(chan) for _ in range(middle_blk_num)]
+                *[NAFDown(chan) for _ in range(middle_blk_num)]
             )
 
         for num in dec_blk_nums:
@@ -198,5 +198,3 @@ class AblatedNAF(nn.Module):
         mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
         x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
         return x
-
-
