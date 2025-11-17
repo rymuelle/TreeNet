@@ -133,7 +133,7 @@ class Branch(nn.Module):
                 self.sca = SCA(channels // 2)
             else:
                 self.conv2 =  nn.Identity()
-                self.sca = nn.Identity()
+                self.sca = SCA(channels // 2)
 
             # Simplified Channel Attention
             
