@@ -49,13 +49,14 @@ def load_cropped_numpy(path, crop_size):
 class DatasetSIDD(Dataset):
     def __init__(self, scene_folders, patch_size=256, crop_size=2560,
                  validation=False, transform=None, max_images=0,
-                 supress_tqdm=True):
+                 supress_tqdm=True, random_augmentation=True):
 
         self.crop_size = crop_size
         self.patch_size = patch_size
         self.validation = validation
         self.transform = transform
         self.supress_tqdm = supress_tqdm
+        self.random_augmentation = random_augmentation
 
         # list of (noisy_path, gt_path)
         self.samples = []
@@ -109,7 +110,7 @@ class DatasetSIDD(Dataset):
 
 
         # Augmentations
-        if not self.validation:
+        if (not self.validation) and self.random_augmentation:
             if random.random() < 0.5:
                 noisy = F.hflip(noisy); clean = F.hflip(clean)
             if random.random() < 0.5:
