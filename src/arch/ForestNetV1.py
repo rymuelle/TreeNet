@@ -175,7 +175,7 @@ class Tree(nn.Module):
 class ForestNetV1(nn.Module):
 
     def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[],
-                 kernels_down=(3, 3, 0, 0), kernels_up=[7, 5, 3, 0]):
+                 kernels_down=[3, 0], kernels_up=[3, 0], middle_kernels=[3, 0]):
         super().__init__()
 
         self.intro = nn.Conv2d(in_channels=img_channel, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
@@ -203,7 +203,7 @@ class ForestNetV1(nn.Module):
 
         self.middle_blks = \
             nn.Sequential(
-                *[Tree(chan, kernels=kernels_down) for _ in range(middle_blk_num)]
+                *[Tree(chan, kernels=middle_kernels) for _ in range(middle_blk_num)]
             )
 
         for num in dec_blk_nums:
