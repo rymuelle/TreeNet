@@ -70,7 +70,7 @@ class LocalEntropyLoss(nn.Module):
     
 
 class PSNR_LE_loss(nn.Module):
-    def __init__(self, kernel_size=5, criterion=nn.MSELoss, weights=[1, 1]):
+    def __init__(self, kernel_size=5, criterion=nn.MSELoss, weights=[1, 1e1]):
         super().__init__()
         self.psnr_loss = PSNRLoss()
         self.le_loss = LocalEntropyLoss(kernel_size=kernel_size, criterion=criterion)
