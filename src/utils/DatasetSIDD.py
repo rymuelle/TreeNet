@@ -49,7 +49,8 @@ def load_cropped_numpy(path, crop_size):
 class DatasetSIDD(Dataset):
     def __init__(self, scene_folders, patch_size=256, crop_size=2560,
                  validation=False, transform=None, max_images=0,
-                 supress_tqdm=True, random_augmentation=True):
+                 supress_tqdm=True, random_augmentation=True,
+                 color_jitter=0):
 
         self.crop_size = crop_size
         self.patch_size = patch_size
@@ -57,7 +58,7 @@ class DatasetSIDD(Dataset):
         self.transform = transform
         self.supress_tqdm = supress_tqdm
         self.random_augmentation = random_augmentation
-
+        self.color_jitter = color_jitter
         # list of (noisy_path, gt_path)
         self.samples = []
         for scene in scene_folders:
@@ -119,6 +120,11 @@ class DatasetSIDD(Dataset):
             if k:
                 noisy = torch.rot90(noisy, k, (1,2))
                 clean = torch.rot90(clean, k, (1,2))
+
+            if self.color_jitter:
+                jitter = self.color_jitter * torch.randn(3) + 1
+                noisy *= jitter.view(-1, 1, 1)
+                clean *= jitter.view(-1, 1, 1)
 
         if self.transform:
             noisy = self.transform(noisy)
