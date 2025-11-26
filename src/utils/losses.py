@@ -38,6 +38,126 @@ class PSNRLoss(nn.Module):
 
 loss_fn = PSNRLoss()
 
+class PSNR_LE_VFE_loss(nn.Module):
+    def __init__(self, kernel_size=5, weights=[1,1]
+                 ):
+        super().__init__()
+        self.psnr_loss = PSNRLoss()
+        self.lcs = LocalCosineSimilarity(kernel_size=kernel_size)
+        self.weights = weights
+        
+    def forward(self, pred, target):
+        loss = 0
+        if self.weights[0] > 0: 
+            loss += self.weights[0] * self.psnr_loss(pred, target) 
+        if self.weights[1] > 0: 
+            loss += self.weights[1] * (1-self.lcs(pred, target)).mean()
+        return loss
+
+class LocalCosineSimilarity(nn.Module):
+    def __init__(self, kernel_size=11, sigma=1, eps=1e-6):
+        super().__init__()
+        padding = kernel_size // 2
+        self.constant = 2 * math.pi * math.e
+        self.kernel_size = kernel_size
+        self.unfold = nn.Unfold((kernel_size, kernel_size), dilation=1, padding=padding, stride=1)
+        self.eps = eps
+        
+
+    def forward(self, x, y):
+        B, C, H, W = x.shape
+        K = self.kernel_size
+
+        # B C K K H W
+        x_patches = self.unfold(x)
+        x_patches = x_patches.view(B, C, K, K, H, W)
+        y_patches = self.unfold(y)
+        y_patches = y_patches.view(B, C, K, K, H, W)
+
+        # B C H W
+        x_norm = (x_patches ** 2).sum(dim=(1, 2, 3)) ** .5
+        y_norm = (y_patches ** 2).sum(dim=(1, 2, 3)) ** .5
+
+        # B C H W
+        dot = (x_patches * y_patches).sum(dim=(1, 2, 3))
+        cosine_similarity = dot/(x_norm*y_norm + self.eps)
+
+        return cosine_similarity
+    
+class WeightedLocalCosineSimilarity(nn.Module):
+    def __init__(self, kernel_size=11, sigma=None, eps=1e-6):
+        super().__init__()
+        padding = kernel_size // 2
+        self.constant = 2 * math.pi * math.e
+        self.kernel_size = kernel_size
+        self.unfold = nn.Unfold((kernel_size, kernel_size), dilation=1, padding=padding, stride=1)
+        self.eps = eps
+
+        # Gaussian Kernel
+        if sigma is None:
+            sigma = kernel_size
+        coords = torch.arange(kernel_size) - padding
+        yy, xx = torch.meshgrid(coords, coords, indexing="ij")
+        g = torch.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+        g = g / g.sum()      
+        self.register_buffer("gauss", g)  
+
+
+    def forward(self, x, y):
+        B, C, H, W = x.shape
+        K = self.kernel_size
+
+        # B C K K H W
+        x_patches = self.unfold(x)
+        x_patches = x_patches.view(B, C, K, K, H, W)
+        y_patches = self.unfold(y)
+        y_patches = y_patches.view(B, C, K, K, H, W)
+
+        # 1 1 K K 1 1
+        w = self.gauss.view(1, 1, K, K, 1, 1)
+        
+        # B C H W
+        x_norm = (w * (x_patches ** 2) ).sum(dim=(1, 2, 3)) ** .5
+        y_norm = (w * (y_patches ** 2) ).sum(dim=(1, 2, 3)) ** .5
+
+        # B C H W
+        dot = (w * x_patches * y_patches).sum(dim=(1, 2, 3))
+        cosine_similarity = dot/(x_norm*y_norm + self.eps)
+
+        return cosine_similarity
+    
+class LocalSTD(nn.Module):
+    def __init__(self, kernel_size=11, sigma=1, stabilization=1e-6):
+        super().__init__()
+        padding = kernel_size // 2
+        self.constant = 2 * math.pi * math.e
+        self.kernel_size = kernel_size
+        self.unfold = nn.Unfold((kernel_size, kernel_size), dilation=1, padding=padding, stride=1)
+        self.stabilization = stabilization
+        
+        # Gaussian Kernel
+        if sigma is None:
+            sigma = kernel_size / 3.0  
+        coords = torch.arange(kernel_size) - padding
+        yy, xx = torch.meshgrid(coords, coords, indexing="ij")
+        g = torch.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+        g = g / g.sum()      # normalize to sum=1
+        self.register_buffer("gauss", g)   # shape (K, K)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        K = self.kernel_size
+
+        patches = self.unfold(x)
+        patches = patches.view(B, C, K, K, H, W)
+
+        w = self.gauss.view(1, 1, K, K, 1, 1)
+
+        mean = (patches * w).sum(dim=(2, 3), keepdim=True)
+        var = (w * (patches - mean)**2).sum(dim=(2, 3)) + self.stabilization
+
+        return var ** .5
+    
 
 class LocalEntropy(nn.Module):
     def __init__(self, kernel_size=11, sigma=1, stabilization=1e-6):
@@ -264,6 +384,38 @@ class L1_LE_VFE_loss(nn.Module):
         loss = 0
         if self.weights[0] > 0: 
             loss += self.l1_loss(pred, target)
+        if self.weights[1] > 0: 
+            loss += self.le_loss(pred, target) * self.weights[1]
+        if self.weights[2] > 0:
+            xps = self.vfe(pred)
+            xts = self.vfe(target)
+            for xp, xt in zip(xps, xts):
+                loss += self.vfw_loss_fn(xp, xt) * self.weights[2]
+            if self.reroll_weights:
+                self.vfe.apply(custom_weight_init)
+        return loss
+
+
+class PSNR_LE_VFE_loss(nn.Module):
+    def __init__(self, kernel_size=5, criterion=nn.MSELoss, weights=[1, .1, 20],
+                 vfe_config=[(1, 64), (1, 128), (1, 256), (1, 512), (1, 512)],
+                 feature_layers=[1, 14],
+                 reroll_weights = True,
+                 ):
+        super().__init__()
+        self.le = LocalEntropy(kernel_size=kernel_size)
+        self.l1_loss = nn.L1Loss()
+        self.le_loss = LocalEntropyLoss(kernel_size=kernel_size, criterion=criterion)
+        self.weights = weights
+        self.vfe = VGGFeatureExtractor(config=vfe_config, feature_layers=feature_layers)
+        self.vfw_loss_fn = nn.MSELoss()
+        self.reroll_weights = reroll_weights
+
+    def forward(self, pred, target):
+        loss = 0
+        le = LocalEntropy
+        if self.weights[0] > 0: 
+            loss += PSNRLoss()
         if self.weights[1] > 0: 
             loss += self.le_loss(pred, target) * self.weights[1]
         if self.weights[2] > 0:
