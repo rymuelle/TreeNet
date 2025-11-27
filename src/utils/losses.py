@@ -38,8 +38,8 @@ class PSNRLoss(nn.Module):
 
 loss_fn = PSNRLoss()
 
-class PSNR_LE_VFE_loss(nn.Module):
-    def __init__(self, kernel_size=5, weights=[1,1]
+class PSNR_LCS(nn.Module):
+    def __init__(self, kernel_size=11, weights=[1,1]
                  ):
         super().__init__()
         self.psnr_loss = PSNRLoss()
@@ -53,6 +53,9 @@ class PSNR_LE_VFE_loss(nn.Module):
         if self.weights[1] > 0: 
             loss += self.weights[1] * (1-self.lcs(pred, target)).mean()
         return loss
+
+
+import torch.nn as nn
 
 class LocalCosineSimilarity(nn.Module):
     def __init__(self, kernel_size=11, sigma=1, eps=1e-6):
@@ -83,6 +86,58 @@ class LocalCosineSimilarity(nn.Module):
         cosine_similarity = dot/(x_norm*y_norm + self.eps)
 
         return cosine_similarity
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(kernel_size={self.kernel_size}, eps={self.eps})'
+
+class PixelPSNRLoss(nn.Module):
+    '''From NAFNet'''
+    def __init__(self, loss_weight=1.0, reduction='mean', toY=False):
+        super(PixelPSNRLoss, self).__init__()
+        assert reduction == 'mean'
+        self.loss_weight = loss_weight
+        self.scale = 10 / np.log(10)
+        self.toY = toY
+        self.coef = torch.tensor([65.481, 128.553, 24.966]).reshape(1, 3, 1, 1)
+        self.first = True
+
+    def forward(self, pred, target):
+        assert len(pred.size()) == 4
+        if self.toY:
+            if self.first:
+                self.coef = self.coef.to(pred.device)
+                self.first = False
+
+            pred = (pred * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.
+            target = (target * self.coef).sum(dim=1).unsqueeze(dim=1) + 16.
+
+            pred, target = pred / 255., target / 255.
+            pass
+        assert len(pred.size()) == 4
+
+        return self.loss_weight * self.scale * torch.log((pred - target) ** 2 + 1e-6).mean()
+
+    def __repr__(self):
+      return f'{self.__class__.__name__}(loss_weight={self.loss_weight}, toY={self.toY})'
+
+class PPSNR_LCS(nn.Module):
+    def __init__(self, kernel_size=11, weights=[1,1], eps=1
+                 ):
+        super().__init__()
+        self.psnr_loss = PixelPSNRLoss()
+        self.lcs = LocalCosineSimilarity(kernel_size=kernel_size, eps=eps)
+        self.weights = weights
+
+    def forward(self, pred, target):
+        loss = 0
+        if self.weights[0] > 0:
+            loss += self.weights[0] * self.psnr_loss(pred, target)
+        if self.weights[1] > 0:
+            loss += self.weights[1] * (1-self.lcs(pred, target)).mean()
+        return loss
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}(psnr_loss={self.psnr_loss}, lcs={self.lcs}, weights={self.weights})'
     
 class WeightedLocalCosineSimilarity(nn.Module):
     def __init__(self, kernel_size=11, sigma=None, eps=1e-6):
