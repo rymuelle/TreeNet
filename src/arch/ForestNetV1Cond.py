@@ -31,8 +31,9 @@ class SCA(nn.Module):
     def __init__(self, c, cond_c):
         super().__init__()
         self.sca = ConditionedChannelAttention(c, cond_c)
+        self.sca_add = ConditionedChannelAttention(c, cond_c)
     def forward(self, x, cond):
-        return x * self.sca(x, cond)
+        return x * self.sca(x, cond) + self.sca_add(x, cond)
     
 class Branch(nn.Module):
     def __init__(self, c, kernel_size, cond_channels, expand=2 ):
@@ -105,7 +106,7 @@ class Tree(nn.Module):
 class ForestNetV1Cond(nn.Module):
 
     def __init__(self, img_channel=3, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[],
-                 kernels_down=[3, 0], kernels_up=[3, 0], middle_kernels=[3, 0], cond_channels=1):
+                 kernels_down=[3, 0], kernels_up=[3, 0], middle_kernels=[3, 0], cond_channels=1, expand=2):
         super().__init__()
 
         self.intro = nn.Conv2d(in_channels=img_channel, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
@@ -123,7 +124,7 @@ class ForestNetV1Cond(nn.Module):
         for num in enc_blk_nums:
             self.encoders.append(
                 nn.Sequential(
-                    *[Tree(chan, cond_channels, kernels=kernels_up) for _ in range(num)]
+                    *[Tree(chan, cond_channels, kernels=kernels_up, expand=expand) for _ in range(num)]
                 )
             )
             self.downs.append(
@@ -133,7 +134,7 @@ class ForestNetV1Cond(nn.Module):
 
         self.middle_blks = \
             nn.Sequential(
-                *[Tree(chan, cond_channels, kernels=middle_kernels) for _ in range(middle_blk_num)]
+                *[Tree(chan, cond_channels, kernels=middle_kernels, expand=expand) for _ in range(middle_blk_num)]
             )
 
         for num in dec_blk_nums:
@@ -146,7 +147,7 @@ class ForestNetV1Cond(nn.Module):
             chan = chan // 2
             self.decoders.append(
                 nn.Sequential(
-                    *[Tree(chan, cond_channels, kernels=kernels_down) for _ in range(num)]
+                    *[Tree(chan, cond_channels, kernels=kernels_down, expand=expand) for _ in range(num)]
                 )
             )
 
