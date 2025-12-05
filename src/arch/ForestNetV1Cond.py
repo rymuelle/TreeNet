@@ -31,9 +31,8 @@ class SCA(nn.Module):
     def __init__(self, c, cond_c):
         super().__init__()
         self.sca = ConditionedChannelAttention(c, cond_c)
-        self.sca_add = ConditionedChannelAttention(c, cond_c)
     def forward(self, x, cond):
-        return x * self.sca(x, cond) + self.sca_add(x, cond)
+        return x * self.sca(x, cond)
     
 class Branch(nn.Module):
     def __init__(self, c, kernel_size, cond_channels, expand=2 ):
