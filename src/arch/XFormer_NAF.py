@@ -9,7 +9,6 @@ import numbers
 
 from einops import rearrange
 
-
 from timm.models.layers import to_2tuple, trunc_normal_
 
 
@@ -92,7 +91,6 @@ class NAFBlock(nn.Module):
         # x = self.dropout2(x)
 
         return y + x * self.gamma
-
 
 def to_3d(x):
     return rearrange(x, 'b c h w -> b (h w) c')
@@ -487,7 +485,7 @@ class Upsample(nn.Module):
 
 
 
-class NAFFormer(nn.Module):
+class XFormer_NAF(nn.Module):
     def __init__(self, 
         inp_channels=3, 
         out_channels=3,
@@ -497,6 +495,7 @@ class NAFFormer(nn.Module):
         num_refinement_blocks = 4,
         num_NAF_refinment_blocks = 0,
         heads = [1,2,4,8],
+        window_size=[16,16,16,16],
         drop_path_rate=0.1,
         ffn_expansion_factor = 2.66,
         bias = False,
@@ -504,7 +503,7 @@ class NAFFormer(nn.Module):
         dual_pixel_task = False 
     ):
 
-        super(NAFFormer, self).__init__()
+        super(XFormer_NAF, self).__init__()
         self.alpha = 1
         self.beta = 1
 
@@ -552,41 +551,57 @@ class NAFFormer(nn.Module):
 
         #####################################  spatial-wise branch  ##################################### 
         self.encoder1 = nn.Sequential(*[
-            NAFBlock(c=dim) for i in range(spatial_num_blocks[0])])
+            NAFBlock(c=int(dim * 2 ** 0)) for i in range(spatial_num_blocks[0])])
 
         self.d1_2 = Downsample(dim)  ## From Level 1 to Level 2
         self.encoder2 = nn.Sequential(*[
             NAFBlock(c=int(dim * 2 ** 1)) for i in range(spatial_num_blocks[1])])
+            # SpatialTransformerBlock(dim=int(dim * 2 ** 1),
+            #                  num_heads=heads[1], window_size=window_size[1], shift_size=0 if (i % 2 == 0) else window_size[1] // 2,
+            #                  mlp_ratio=ffn_expansion_factor,
+            #                  drop_path=dpr[sum(spatial_num_blocks[:1]):sum(spatial_num_blocks[:2])][i]) for i in range(spatial_num_blocks[1])])
 
         self.d2_3 = Downsample(int(dim * 2 ** 1))  ## From Level 2 to Level 3
         self.encoder3 = nn.Sequential(*[
-            NAFBlock(c=int(dim * 2 ** 2)) for i in range(spatial_num_blocks[2])])
+            SpatialTransformerBlock(dim=int(dim * 2 ** 2),
+                             num_heads=heads[2], window_size=window_size[2], shift_size=0 if (i % 2 == 0) else window_size[2] // 2,
+                             mlp_ratio=ffn_expansion_factor,
+                             drop_path=dpr[sum(spatial_num_blocks[:2]):sum(spatial_num_blocks[:3])][i]) for i in range(spatial_num_blocks[2])])
 
         self.d3_4 = Downsample(int(dim * 2 ** 2))  ## From Level 3 to Level 4
         self.s_latent = nn.Sequential(*[
-            NAFBlock(c=int(dim * 2 ** 3)) for i in range(spatial_num_blocks[3])])
+            SpatialTransformerBlock(dim=int(dim * 2 ** 3),
+                             num_heads=heads[3], window_size=window_size[3], shift_size=0 if (i % 2 == 0) else window_size[3] // 2,
+                             mlp_ratio=ffn_expansion_factor,
+                             drop_path=dpr[sum(spatial_num_blocks[:3]):sum(spatial_num_blocks[:4])][i]) for i in range(spatial_num_blocks[3])])
 
         self.u4_3 = Upsample(int(dim * 2 ** 3))  ## From Level 4 to Level 3
         self.reduce3 = nn.Conv2d(int(dim * 2 ** 3), int(dim * 2 ** 2), kernel_size=1, bias=bias)
         self.decoder3 = nn.Sequential(*[
-            NAFBlock(c=int(dim * 2 ** 2)) for i in range(spatial_num_blocks[2])])
+            SpatialTransformerBlock(dim=int(dim * 2 ** 2),
+                             num_heads=heads[2], window_size=window_size[2], shift_size=0 if (i % 2 == 0) else window_size[2] // 2,
+                             mlp_ratio=ffn_expansion_factor,
+                             drop_path=dpr[sum(spatial_num_blocks[:2]):sum(spatial_num_blocks[:3])][i]) for i in range(spatial_num_blocks[2])])
 
         self.u3_2 = Upsample(int(dim * 2 ** 2))  ## From Level 3 to Level 2
         self.reduce2 = nn.Conv2d(int(dim * 2 ** 2), int(dim * 2 ** 1), kernel_size=1, bias=bias)
         self.decoder2 = nn.Sequential(*[
             NAFBlock(c=int(dim * 2 ** 1)) for i in range(spatial_num_blocks[1])])
+            # SpatialTransformerBlock(dim=int(dim * 2 ** 1),
+            #                  num_heads=heads[1], window_size=window_size[1], shift_size=0 if (i % 2 == 0) else window_size[1] // 2,
+            #                  mlp_ratio=ffn_expansion_factor,
+            #                  drop_path=dpr[sum(spatial_num_blocks[:1]):sum(spatial_num_blocks[:2])][i]) for i in range(spatial_num_blocks[1])])
 
         self.u2_1 = Upsample(int(dim * 2 ** 1))  ## From Level 2 to Level 1
         self.reduce1 = nn.Conv2d(int(dim * 2), int(dim), kernel_size=1, bias=bias)
         self.decoder1 = nn.Sequential(*[
-            NAFBlock(c=int(dim)) for i in range(spatial_num_blocks[0])])
+            NAFBlock(c=int(dim * 2 ** 0)) for i in range(spatial_num_blocks[0])])
         #####################################  end  ##################################### 
 
 
         #####################################  refinement stage  ##################################### 
         self.refinement = nn.Sequential(*[ChannelTransformerBlock(dim=int(dim*2**1), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_refinement_blocks)])
         self.naf_refinement = nn.Sequential(*[NAFBlock(c=int(dim*2**1), DW_Expand=1, FFN_Expand=1) for i in range(spatial_num_blocks[1]) for i in range(num_NAF_refinment_blocks)])
-        # self.naf_refinement = nn.Sequential(*[FeedForward(dim=int(dim*2**1), ffn_expansion_factor=1, bias=bias) for i in range(spatial_num_blocks[1]) for i in range(num_NAF_refinment_blocks)])
 
         self.dual_pixel_task = dual_pixel_task
         if self.dual_pixel_task:
