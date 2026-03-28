@@ -1,6 +1,4 @@
-# https://github.com/gladzhang/Xformer
-
-## Pytorch implementation of Xformer. 
+## Pytorch implementation of Xformer. This version use the redundant params 'input_resolution', which does ont affect results.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -189,6 +187,7 @@ class WindowAttention(nn.Module):
 class SpatialTransformerBlock(nn.Module):
     def __init__(self,
                  dim,
+                 input_resolution,
                  num_heads,
                  window_size=8,
                  shift_size=0,
@@ -202,11 +201,14 @@ class SpatialTransformerBlock(nn.Module):
                  norm_layer=nn.LayerNorm):
         super().__init__()
         self.dim = dim
+        self.input_resolution = input_resolution
         self.num_heads = num_heads
         self.window_size = window_size
         self.shift_size = shift_size
         self.mlp_ratio = mlp_ratio
-        
+        if min(self.input_resolution) <= self.window_size:
+            self.shift_size = 0
+            self.window_size = min(self.input_resolution)
         assert 0 <= self.shift_size < self.window_size, 'shift_size must in 0-window_size'
 
         self.norm1 = norm_layer(dim)
@@ -224,6 +226,12 @@ class SpatialTransformerBlock(nn.Module):
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
+        if self.shift_size > 0:
+            attn_mask = self.calculate_mask(self.input_resolution)
+        else:
+            attn_mask = None
+
+        self.register_buffer('attn_mask', attn_mask)
 
     def calculate_mask(self, x_size):
         # calculate mask for shift
@@ -253,7 +261,6 @@ class SpatialTransformerBlock(nn.Module):
         shortcut = x
         x = self.norm1(x)
         x = x.view(b, h, w, c)
-
         # padding
         size_par = self.window_size
         pad_l = pad_t = 0
@@ -263,9 +270,9 @@ class SpatialTransformerBlock(nn.Module):
         _, Hd, Wd, _ = x.shape
         x_size = (Hd, Wd)
 
-        if min(x_size) == self.window_size:
+        if min(x_size) <= self.window_size:
             self.shift_size = 0
-        assert self.window_size <= min(x_size)
+            self.window_size = min(x_size)
 
         if self.shift_size > 0:
             shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
@@ -275,19 +282,18 @@ class SpatialTransformerBlock(nn.Module):
         x_windows = window_partition(shifted_x, self.window_size)
         x_windows = x_windows.view(-1, self.window_size * self.window_size, c)
 
-        if self.shift_size == 0:
-            attn_windows = self.attn(x_windows, mask=None)
+        if self.input_resolution == x_size:
+            attn_windows = self.attn(x_windows, mask=self.attn_mask)
         else:
             attn_windows = self.attn(x_windows, mask=self.calculate_mask(x_size).to(x.device))
 
         attn_windows = attn_windows.view(-1, self.window_size, self.window_size, c)
-        shifted_x = window_reverse(attn_windows, self.window_size, Hd, Wd)
+        shifted_x = window_reverse(attn_windows, self.window_size, Hd, Wd)  # b h' w' c
 
         if self.shift_size > 0:
             x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
         else:
             x = shifted_x
-
         # remove padding
         if pad_r > 0 or pad_b > 0:
             x = x[:, :h, :w, :].contiguous()
@@ -300,7 +306,6 @@ class SpatialTransformerBlock(nn.Module):
         x = to_4d(x, h, w)
 
         return x
-
 
 
 class FeedForward(nn.Module):
@@ -319,12 +324,12 @@ class FeedForward(nn.Module):
         return x
 
 
+
 class Attention(nn.Module):
     def __init__(self, dim, num_heads, bias):
         super(Attention, self).__init__()
         self.num_heads = num_heads
         self.temperature = nn.Parameter(torch.ones(num_heads, 1, 1))
-
         self.qkv = nn.Conv2d(dim, dim*3, kernel_size=1, bias=bias)
         self.qkv_dwconv = nn.Conv2d(dim*3, dim*3, kernel_size=3, stride=1, padding=1, groups=dim*3, bias=bias)
         self.project_out = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
@@ -346,13 +351,13 @@ class Attention(nn.Module):
 
         attn = (q @ k.transpose(-2, -1)) * self.temperature
         attn = attn.softmax(dim=-1)
-
+       
         out = (attn @ v)
-        
         out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=h, w=w)
 
         out = self.project_out(out)
         return out
+
 
 
 ## Channel-wise cross-covariance Transformer block (CTB in this paper)
@@ -371,8 +376,8 @@ class ChannelTransformerBlock(nn.Module):
 
         return x
 
-
-
+    
+    
 class OverlapPatchEmbed(nn.Module):
     def __init__(self, in_c=3, embed_dim=48, bias=False):
         super(OverlapPatchEmbed, self).__init__()
@@ -381,7 +386,6 @@ class OverlapPatchEmbed(nn.Module):
     def forward(self, x):
         x = self.proj(x)
         return x
-
 
 
 
@@ -397,7 +401,6 @@ class Downsample(nn.Module):
 class Upsample(nn.Module):
     def __init__(self, n_feat):
         super(Upsample, self).__init__()
-
         self.body = nn.Sequential(nn.Conv2d(n_feat, n_feat*2, kernel_size=3, stride=1, padding=1, bias=False),
                                   nn.PixelShuffle(2))
 
@@ -405,11 +408,11 @@ class Upsample(nn.Module):
         return self.body(x)
 
 
-
-class Xformer(nn.Module):
+class XFormer(nn.Module):
     def __init__(self, 
         inp_channels=3, 
         out_channels=3,
+        img_size = 128,
         dim = 48,
         num_blocks = [2,4,4], 
         spatial_num_blocks = [2,4,4,6],
@@ -419,11 +422,11 @@ class Xformer(nn.Module):
         drop_path_rate=0.1,
         ffn_expansion_factor = 2.66,
         bias = False,
-        LayerNorm_type = 'BiasFree',   ## Other option 'WithBias'
-        dual_pixel_task = False 
+        LayerNorm_type = 'WithBias',   ## Other option 'BiasFree'
+        dual_pixel_task = False
     ):
 
-        super(Xformer, self).__init__()
+        super(XFormer, self).__init__()
         self.alpha = 1
         self.beta = 1
 
@@ -464,14 +467,14 @@ class Xformer(nn.Module):
         self.reduce_chan_level2 = nn.Conv2d(int(dim*2**2), int(dim*2**1), kernel_size=1, bias=bias)
         self.decoder_level2 = nn.Sequential(*[ChannelTransformerBlock(dim=int(dim*2**1), num_heads=heads[1], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[1])])
 
-        self.up2_1 = Upsample(int(dim*2**1))  ## From Level 2 to Level 1
+        self.up2_1 = Upsample(int(dim*2**1))  ## From Level 2 to Level 1 
         self.reduce_chan_level1 = nn.Conv2d(int(dim*2), int(dim), kernel_size=1, bias=bias)
         self.decoder_level1 = nn.Sequential(*[ChannelTransformerBlock(dim=int(dim), num_heads=heads[0], ffn_expansion_factor=ffn_expansion_factor, bias=bias, LayerNorm_type=LayerNorm_type) for i in range(num_blocks[0])])
-         #########################################  end  ##################################### 
+        #####################################  end  ##################################### 
 
         #####################################  spatial-wise branch  ##################################### 
         self.encoder1 = nn.Sequential(*[
-            SpatialTransformerBlock(dim=dim,
+            SpatialTransformerBlock(dim=dim, input_resolution=(img_size, img_size),
                              num_heads=heads[0], window_size=window_size[0], shift_size=0 if (i % 2 == 0) else window_size[0] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:0]):sum(spatial_num_blocks[:1])][i]
@@ -479,46 +482,41 @@ class Xformer(nn.Module):
 
         self.d1_2 = Downsample(dim)  ## From Level 1 to Level 2
         self.encoder2 = nn.Sequential(*[
-            SpatialTransformerBlock(dim=int(dim * 2 ** 1),
+            SpatialTransformerBlock(dim=int(dim * 2 ** 1), input_resolution=(img_size//2, img_size//2),
                              num_heads=heads[1], window_size=window_size[1], shift_size=0 if (i % 2 == 0) else window_size[1] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:1]):sum(spatial_num_blocks[:2])][i]) for i in range(spatial_num_blocks[1])])
 
         self.d2_3 = Downsample(int(dim * 2 ** 1))  ## From Level 2 to Level 3
         self.encoder3 = nn.Sequential(*[
-            SpatialTransformerBlock(dim=int(dim * 2 ** 2),
-                             num_heads=heads[2], window_size=window_size[2], shift_size=0 if (i % 2 == 0) else window_size[2] // 2,
+            SpatialTransformerBlock(dim=int(dim * 2 ** 2),input_resolution=(img_size//4, img_size//4), num_heads=heads[2], window_size=window_size[2], shift_size=0 if (i % 2 == 0) else window_size[2] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:2]):sum(spatial_num_blocks[:3])][i]) for i in range(spatial_num_blocks[2])])
 
         self.d3_4 = Downsample(int(dim * 2 ** 2))  ## From Level 3 to Level 4
         self.s_latent = nn.Sequential(*[
-            SpatialTransformerBlock(dim=int(dim * 2 ** 3),
-                             num_heads=heads[3], window_size=window_size[3], shift_size=0 if (i % 2 == 0) else window_size[3] // 2,
+            SpatialTransformerBlock(dim=int(dim * 2 ** 3), input_resolution=(img_size//8, img_size//8),num_heads=heads[3], window_size=window_size[3], shift_size=0 if (i % 2 == 0) else window_size[3] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:3]):sum(spatial_num_blocks[:4])][i]) for i in range(spatial_num_blocks[3])])
 
         self.u4_3 = Upsample(int(dim * 2 ** 3))  ## From Level 4 to Level 3
         self.reduce3 = nn.Conv2d(int(dim * 2 ** 3), int(dim * 2 ** 2), kernel_size=1, bias=bias)
         self.decoder3 = nn.Sequential(*[
-            SpatialTransformerBlock(dim=int(dim * 2 ** 2),
-                             num_heads=heads[2], window_size=window_size[2], shift_size=0 if (i % 2 == 0) else window_size[2] // 2,
+            SpatialTransformerBlock(dim=int(dim * 2 ** 2), input_resolution=(img_size//4, img_size//4),num_heads=heads[2], window_size=window_size[2], shift_size=0 if (i % 2 == 0) else window_size[2] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:2]):sum(spatial_num_blocks[:3])][i]) for i in range(spatial_num_blocks[2])])
 
         self.u3_2 = Upsample(int(dim * 2 ** 2))  ## From Level 3 to Level 2
         self.reduce2 = nn.Conv2d(int(dim * 2 ** 2), int(dim * 2 ** 1), kernel_size=1, bias=bias)
         self.decoder2 = nn.Sequential(*[
-            SpatialTransformerBlock(dim=int(dim * 2 ** 1),
-                             num_heads=heads[1], window_size=window_size[1], shift_size=0 if (i % 2 == 0) else window_size[1] // 2,
+            SpatialTransformerBlock(dim=int(dim * 2 ** 1), input_resolution=(img_size//2, img_size//2),num_heads=heads[1], window_size=window_size[1], shift_size=0 if (i % 2 == 0) else window_size[1] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:1]):sum(spatial_num_blocks[:2])][i]) for i in range(spatial_num_blocks[1])])
 
-        self.u2_1 = Upsample(int(dim * 2 ** 1))  ## From Level 2 to Level 1
+        self.u2_1 = Upsample(int(dim * 2 ** 1))  ## From Level 2 to Level 1 
         self.reduce1 = nn.Conv2d(int(dim * 2), int(dim), kernel_size=1, bias=bias)
         self.decoder1 = nn.Sequential(*[
-            SpatialTransformerBlock(dim=int(dim),
-                             num_heads=heads[0], window_size=window_size[0], shift_size=0 if (i % 2 == 0) else window_size[0] // 2,
+            SpatialTransformerBlock(dim=int(dim), input_resolution=(img_size, img_size),num_heads=heads[0], window_size=window_size[0], shift_size=0 if (i % 2 == 0) else window_size[0] // 2,
                              mlp_ratio=ffn_expansion_factor,
                              drop_path=dpr[sum(spatial_num_blocks[:0]):sum(spatial_num_blocks[:1])][i]) for i in range(spatial_num_blocks[0])])
         #####################################  end  ##################################### 
