@@ -42,7 +42,7 @@ class TiledMDTA(nn.Module):
             qk = self.qk(pattn)
             q, k  = qk.chunk(2, dim=-1)
 
-            scale = pattn.shape[-1] ** -0.5
+            scale = q.shape[-1] ** -0.5
             pattn_scores = torch.matmul(q, k.transpose(-2, -1)) * scale * self.patch_attn_temperature
             pattn_attn = pattn_scores.softmax(dim=-1)
             
