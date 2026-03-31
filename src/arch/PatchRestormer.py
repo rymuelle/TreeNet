@@ -16,6 +16,9 @@ class TiledMDTA(nn.Module):
         self.project_out = nn.Conv2d(channels, channels, kernel_size=1, bias=False)
 
         self.patch_attention = patch_attention
+        if patch_attention:
+            self.gamma = nn.Parameter(torch.zeros(1))
+            self.patch_attn_temperature = nn.Parameter(torch.ones(1, num_heads, 1, 1))
 
     def forward(self, x):
         b, c, h, w = x.shape
@@ -37,13 +40,14 @@ class TiledMDTA(nn.Module):
             pattn = F.layer_norm(pattn, [pattn.shape[-1]]) 
         
             scale = pattn.shape[-1] ** -0.5
-            pattn_scores = torch.matmul(pattn, pattn.transpose(-2, -1)) * scale
+            pattn_scores = torch.matmul(pattn, pattn.transpose(-2, -1)) * scale * self.patch_attn_temperature
             pattn_attn = pattn_scores.softmax(dim=-1)
             
             pattn = pattn_attn @ pattn 
             
-            attn = rearrange(pattn, 'b head hw (c0 c1) -> b head hw c0 c1', 
+            pattn = rearrange(pattn, 'b head hw (c0 c1) -> b head hw c0 c1', 
                             c0=c//self.num_heads, c1=c//self.num_heads)
+            attn = attn + self.gamma * pattn
             
         attn = attn.softmax(dim=-1)
 
