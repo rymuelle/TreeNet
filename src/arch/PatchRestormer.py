@@ -96,11 +96,11 @@ class GDFN(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, channels, num_heads, expansion_factor, window_size):
+    def __init__(self, channels, num_heads, expansion_factor, window_size, patch_attention=False):
         super(TransformerBlock, self).__init__()
 
         self.norm1 = nn.LayerNorm(channels)
-        self.attn = TiledMDTA(channels, num_heads, window_size)
+        self.attn = TiledMDTA(channels, num_heads, window_size, patch_attention=patch_attention)
         self.norm2 = nn.LayerNorm(channels)
         self.ffn = GDFN(channels, expansion_factor)
 
@@ -135,13 +135,13 @@ class UpSample(nn.Module):
 
 class PatchRestormer(nn.Module):
     def __init__(self, num_blocks=[4, 6, 6, 8], num_heads=[1, 2, 4, 8], channels=[48, 96, 192, 384], num_refinement=4,
-                 expansion_factor=2.66, window_sizes=[16, 8, 4, 2]):
+                 expansion_factor=2.66, window_sizes=[16, 8, 4, 2], patch_attention=[0,0,0,0]):
         super(PatchRestormer, self).__init__()
 
         self.embed_conv = nn.Conv2d(3, channels[0], kernel_size=3, padding=1, bias=False)
         self.encoders = nn.ModuleList([nn.Sequential(*[TransformerBlock(
-            num_ch, num_ah, expansion_factor, ws) for _ in range(num_tb)]) for num_tb, num_ah, num_ch, ws in
-                                       zip(num_blocks, num_heads, channels, window_sizes)])
+            num_ch, num_ah, expansion_factor, ws, patch_attention=pa) for _ in range(num_tb)]) for num_tb, num_ah, num_ch, ws, pa in
+                                       zip(num_blocks, num_heads, channels, window_sizes, patch_attention)])
         
         # the number of down sample or up sample == the number of encoder - 1
         self.downs = nn.ModuleList([DownSample(num_ch) for num_ch in channels[:-1]])
@@ -150,21 +150,25 @@ class PatchRestormer(nn.Module):
         self.reduces = nn.ModuleList([nn.Conv2d(channels[i], channels[i - 1], kernel_size=1, bias=False)
                                       for i in reversed(range(2, len(channels)))])
         # the number of decoder == the number of encoder - 1
-        self.decoders = nn.ModuleList([nn.Sequential(*[TransformerBlock(channels[2], num_heads[2], expansion_factor, window_sizes[2])
+        self.decoders = nn.ModuleList([nn.Sequential(*[TransformerBlock(channels[2], num_heads[2], expansion_factor, window_sizes[2],
+                                                                        patch_attention=patch_attention[2])
                                                        for _ in range(num_blocks[2])], 
                                                      # Branch(channels[2], 3), Branch(channels[2], 0)
                                                     )])
-        self.decoders.append(nn.Sequential(*[TransformerBlock(channels[1], num_heads[1], expansion_factor, window_sizes[1])
+        self.decoders.append(nn.Sequential(*[TransformerBlock(channels[1], num_heads[1], expansion_factor, window_sizes[1],
+                                                                        patch_attention=patch_attention[1])
                                              for _ in range(num_blocks[1])], 
                                                      # Branch(channels[1], 3), Branch(channels[1], 0)
                                                     ))
         # the channel of last one is not change
-        self.decoders.append(nn.Sequential(*[TransformerBlock(channels[1], num_heads[0], expansion_factor, window_sizes[0])
+        self.decoders.append(nn.Sequential(*[TransformerBlock(channels[1], num_heads[0], expansion_factor, window_sizes[0],
+                                                                        patch_attention=patch_attention[0])
                                              for _ in range(num_blocks[0])], 
                                                      # Branch(channels[1], 3), Branch(channels[1], 0)
                                                     ))
 
-        self.refinement = nn.Sequential(*[TransformerBlock(channels[1], num_heads[0], expansion_factor, window_sizes[0])
+        self.refinement = nn.Sequential(*[TransformerBlock(channels[1], num_heads[0], expansion_factor, window_sizes[0],
+                                                                        patch_attention=patch_attention[0])
                                           for _ in range(num_refinement)], 
                                           # Branch(channels[1], 3), Branch(channels[1], 0)
                                         )
