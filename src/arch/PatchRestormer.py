@@ -19,6 +19,7 @@ class TiledMDTA(nn.Module):
         if patch_attention:
             self.gamma = nn.Parameter(torch.zeros(1))
             self.patch_attn_temperature = nn.Parameter(torch.ones(1, num_heads, 1, 1))
+            self.qk = nn.Linear(channels // num_heads, (channels // num_heads) * 2)
 
     def forward(self, x):
         b, c, h, w = x.shape
@@ -36,23 +37,23 @@ class TiledMDTA(nn.Module):
         attn = torch.matmul(q, k.transpose(-2, -1)) * self.temperature
 
         if self.patch_attention:
-            pattn = rearrange(attn, 'b head hw c0 c1 -> b head hw (c0 c1)')
+            pattn = attn.mean(dim=-1)
             pattn = F.layer_norm(pattn, [pattn.shape[-1]]) 
-        
+            qk = self.qk(pattn)
+            q, k  = qk.chunk(2, dim=-1)
+
             scale = pattn.shape[-1] ** -0.5
-            pattn_scores = torch.matmul(pattn, pattn.transpose(-2, -1)) * scale * self.patch_attn_temperature
+            pattn_scores = torch.matmul(q, k.transpose(-2, -1)) * scale * self.patch_attn_temperature
             pattn_attn = pattn_scores.softmax(dim=-1)
             
-            pattn = pattn_attn @ pattn 
-            
-            pattn = rearrange(pattn, 'b head hw (c0 c1) -> b head hw c0 c1', 
+            attn_v = rearrange(attn, 'b head hw c0 c1 -> b head hw (c0 c1)')
+            attn_v = pattn_attn @ attn_v 
+            attn_v = rearrange(attn_v, 'b head hw (c0 c1) -> b head hw c0 c1', 
                             c0=c//self.num_heads, c1=c//self.num_heads)
-            attn = attn + self.gamma * pattn
+            attn = attn + self.gamma * attn_v
             
         attn = attn.softmax(dim=-1)
-
         out = attn @ v 
-        
         out = rearrange(out, 'b head (h w) c (ph pw) -> b (head c) (h ph) (w pw)', 
                         h=h//self.window_size, w=w//self.window_size, ph=self.window_size, pw=self.window_size)
 
