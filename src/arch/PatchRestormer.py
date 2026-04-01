@@ -17,7 +17,7 @@ class TiledMDTA(nn.Module):
 
         self.patch_attention = patch_attention
         if patch_attention:
-            self.gamma = nn.Parameter(torch.zeros(1))
+            self.gamma = nn.Parameter(torch.ones(1))
             self.patch_attn_temperature = nn.Parameter(torch.ones(1, num_heads, 1, 1))
             self.qk = nn.Linear(channels // num_heads, (channels // num_heads) * 2)
 
