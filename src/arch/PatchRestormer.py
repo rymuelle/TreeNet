@@ -105,15 +105,24 @@ class TransformerBlock(nn.Module):
         super(TransformerBlock, self).__init__()
 
         self.norm1 = nn.LayerNorm(channels)
-        self.attn = TiledMDTA(channels, num_heads, window_size, patch_attention=patch_attention)
+        self.attn = MDTA(channels, num_heads)
         self.norm2 = nn.LayerNorm(channels)
         self.ffn = GDFN(channels, expansion_factor)
+
+        self.norm3 = nn.LayerNorm(channels)
+        self.attn2 = TiledMDTA(channels, num_heads, window_size, patch_attention=patch_attention)
+        self.norm4 = nn.LayerNorm(channels)
+        self.ffn2 = GDFN(channels, expansion_factor)
 
     def forward(self, x):
         b, c, h, w = x.shape
         x = x + self.attn(self.norm1(x.reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1)
                           .contiguous().reshape(b, c, h, w))
         x = x + self.ffn(self.norm2(x.reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1)
+                         .contiguous().reshape(b, c, h, w))
+        x = x + self.attn2(self.norm3(x.reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1)
+                          .contiguous().reshape(b, c, h, w))
+        x = x + self.ffn2(self.norm4(x.reshape(b, c, -1).transpose(-2, -1).contiguous()).transpose(-2, -1)
                          .contiguous().reshape(b, c, h, w))
         return x
 
