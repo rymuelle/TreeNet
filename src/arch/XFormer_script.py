@@ -198,118 +198,102 @@ class SpatialTransformerBlock(nn.Module):
                  shift_size=0,
                  mlp_ratio=4.,
                  qkv_bias=True,
-                 qk_scale=None,
-                 drop=0.,
-                 attn_drop=0.,
-                 drop_path=0.,
-                 act_layer=nn.GELU,
-                 norm_layer=nn.LayerNorm):
+                 drop_path=0.):
         super().__init__()
         self.dim = dim
         self.input_resolution = input_resolution
-        self.num_heads = num_heads
         self.window_size = window_size
         self.shift_size = shift_size
-        self.mlp_ratio = mlp_ratio
-        if min(self.input_resolution) <= self.window_size:
-            self.shift_size = 0
-            self.window_size = min(self.input_resolution)
-        assert 0 <= self.shift_size < self.window_size, 'shift_size must in 0-window_size'
+        
+        # Pre-calculate fixed padding parameters
+        h, w = input_resolution
+        self.pad_r = (window_size - w % window_size) % window_size
+        self.pad_b = (window_size - h % window_size) % window_size
+        self.padded_res = (h + self.pad_b, w + self.pad_r)
 
-        self.norm1 = norm_layer(dim)
+        # Components
+        self.norm1 = nn.LayerNorm(dim)
         self.attn = WindowAttention(
-            dim,
-            window_size=to_2tuple(self.window_size),
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop=attn_drop,
-            proj_drop=drop)
-
+            dim, window_size=to_2tuple(window_size), num_heads=num_heads, qkv_bias=qkv_bias)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio))
 
+        # Static Mask Generation
         if self.shift_size > 0:
-            attn_mask = self.calculate_mask(self.input_resolution)
+            mask = self._create_static_mask(self.padded_res)
         else:
-            attn_mask = None
+            mask = torch.zeros(1, 1, 1, 1)
 
-        self.register_buffer('attn_mask', attn_mask)
+        self.register_buffer('attn_mask', mask)
 
-    def calculate_mask(self, x_size:tuple[int, int]):
-        # calculate mask for shift
-        h, w = x_size
-        img_mask = torch.zeros((1, h, w, 1), device=self.attn.relative_position_bias_table.device)  # 1 h w 1
-        h_slices = (slice(0, -self.window_size), slice(-self.window_size,
-                                                       -self.shift_size), slice(-self.shift_size, None))
-        w_slices = (slice(0, -self.window_size), slice(-self.window_size,
-                                                       -self.shift_size), slice(-self.shift_size, None))
+    def _create_static_mask(self, res):
+        h, w = res
+        img_mask = torch.zeros((1, h, w, 1))
+        h_slices = (slice(0, -self.window_size), 
+                    slice(-self.window_size, -self.shift_size), 
+                    slice(-self.shift_size, None))
+        w_slices = (slice(0, -self.window_size), 
+                    slice(-self.window_size, -self.shift_size), 
+                    slice(-self.shift_size, None))
         cnt = 0
-        for h in h_slices:
-            for w in w_slices:
-                img_mask[:, h, w, :] = cnt
+        for hs in h_slices:
+            for ws in w_slices:
+                img_mask[:, hs, ws, :] = cnt
                 cnt += 1
 
         mask_windows = window_partition(img_mask, self.window_size)
         mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
         attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-        attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
-
-        return attn_mask
+        return attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
     def forward(self, x):
+        # x shape: [B, C, H, W]
         b, c, h, w = x.shape
-    
-        x = to_3d(x)
-        shortcut = x
+        
+        # Use flattened view for norm
+        x = x.permute(0, 2, 3, 1).contiguous() # B, H, W, C
+        shortcut = x.view(b, h * w, c)
+        
         x = self.norm1(x)
-        x = x.view(b, h, w, c)
-        # padding
-        size_par = self.window_size
-        pad_l = pad_t = 0
-        pad_r = (size_par - w % size_par) % size_par
-        pad_b = (size_par - h % size_par) % size_par
-        x = F.pad(x, (0, 0, pad_l, pad_r, pad_t, pad_b))
-        _, Hd, Wd, _ = x.shape
-        x_size = (Hd, Wd)
 
-        if min(x_size) <= self.window_size:
-            self.shift_size = 0
-            self.window_size = min(x_size)
+        # Static Padding
+        if self.pad_r > 0 or self.pad_b > 0:
+            x = F.pad(x, (0, 0, 0, self.pad_r, 0, self.pad_b))
+        
+        ph, pw = x.shape[1], x.shape[2]
 
+        # Cyclic Shift
         if self.shift_size > 0:
-            shifted_x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
-        else:
-            shifted_x = x
+            x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
 
-        x_windows = window_partition(shifted_x, self.window_size)
+        # Partition
+        x_windows = window_partition(x, self.window_size)
         x_windows = x_windows.view(-1, self.window_size * self.window_size, c)
 
-        if self.input_resolution == x_size:
+        # Attention with static mask
+        if self.shift_size > 0:
             attn_windows = self.attn(x_windows, mask=self.attn_mask)
         else:
-            attn_windows = self.attn(x_windows, mask=self.calculate_mask(x_size).to(x.device))
+            attn_windows = self.attn(x_windows, mask=None)
 
+        # Reverse Shift
         attn_windows = attn_windows.view(-1, self.window_size, self.window_size, c)
-        shifted_x = window_reverse(attn_windows, self.window_size, Hd, Wd)  # b h' w' c
+        x = window_reverse(attn_windows, self.window_size, ph, pw)
 
         if self.shift_size > 0:
-            x = torch.roll(shifted_x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
-        else:
-            x = shifted_x
-        # remove padding
-        if pad_r > 0 or pad_b > 0:
-            x = x[:, :h, :w, :].contiguous()
-        x = x.view(b, h * w, c)
+            x = torch.roll(x, shifts=(self.shift_size, self.shift_size), dims=(1, 2))
 
-        # FFN
+        # Crop back to original size
+        if self.pad_r > 0 or self.pad_b > 0:
+            x = x[:, :h, :w, :].contiguous()
+            
+        x = x.view(b, h * w, c)
         x = shortcut + self.drop_path(x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-        x = to_4d(x, h, w)
-
+        
+        # Back to B, C, H, W
+        x = x.view(b, h, w, c).permute(0, 3, 1, 2).contiguous()
         return x
 
 
