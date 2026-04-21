@@ -19,19 +19,20 @@ class Adapter(nn.Module):
         
         self.camera_rgb_adjust = torch.nn.Parameter(torch.tensor(rgb_multiplier).view(1, 3, 1, 1), requires_grad=True)
         self.gamma = torch.nn.Parameter(torch.tensor([gamma]), requires_grad=True)
-
+        self.alpha = nn.Parameter(torch.zeros((1, 3, 1, 1)), requires_grad=True)
+        self.beta = nn.Parameter(torch.zeros((1, 3, 1, 1)), requires_grad=True)
     def to_proc(self, inp):
         # To processed like
         inp = inp ** self.gamma
         inp = inp * self.camera_rgb_adjust
-        inp = self.intro(inp) + inp
+        inp = self.intro(inp) * self.alpha + inp
         return inp
 
     def to_RAW(self, out):
         # To RAW like
-        out = self.outro(out)
+        out = self.outro(out) * self.beta + out
         out = out /  self.camera_rgb_adjust
-        out = torch.clamp(out, 0.0, 1.0)
+        out = torch.clamp(out, 1e-6, 1.0)
 
         out = out ** (1./self.gamma)
         return out
