@@ -83,12 +83,12 @@ class NAFNet(nn.Module):
 
     def __init__(self, img_channel=3, in_channels=None, width=16, middle_blk_num=1, enc_blk_nums=[], dec_blk_nums=[]):
         super().__init__()
-        
-        self.residual = nn.Identity()
-        if not in_channels is None:
-            self.residual = nn.Conv2d(in_channels=in_channels, out_channels=img_channel, kernel_size=1, padding=0, stride=1, groups=1,
-                                bias=True)   
-            
+
+        # self.residual = nn.Identity()
+        # if not in_channels is None:
+        #     self.residual = nn.Conv2d(in_channels=in_channels, out_channels=img_channel, kernel_size=1, padding=0, stride=1, groups=1,
+        #                         bias=True)   
+        self.img_channel = img_channel
         if in_channels is None:
             in_channels = img_channel
         self.intro = nn.Conv2d(in_channels=in_channels, out_channels=width, kernel_size=3, padding=1, stride=1, groups=1,
@@ -157,7 +157,8 @@ class NAFNet(nn.Module):
             x = decoder(x)
 
         x = self.ending(x)
-        x = x +  self.residual(inp)
+        inp = inp[:,:self.img_channel, ::]
+        x = x + inp
 
         return x[:, :, :H, :W]
 
