@@ -154,7 +154,7 @@ class NAFNet(nn.Module):
 
         x = self.ending(x)
         x = x[:, :, :H, :W] * self.alpha + self.gain
-        return 
+        return x
 
     def check_image_size(self, x):
         _, _, h, w = x.size()
